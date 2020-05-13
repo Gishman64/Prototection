@@ -5,6 +5,7 @@
 #include <conio.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <cstdio>
 #include <fstream>
 #include <Windows.h>
 #include <locale.h>
@@ -15,14 +16,17 @@ typedef unsigned char byte;
 
 char crcString[2];
 char msgLen[2];
-wchar_t* imgFileName = L"5.bmp";
-wchar_t* msgFileName = L"toCrypt.txt";
-
+wchar_t* outputFile = L"5.bmp";
+wchar_t* inputFile = L"4.exe";
+LONGLONG fileLength;
 int absoluteCurPosition = 0;
 int curBitPos = 0;
 int curImagePos = 0;
 int imgI = 0;
 int imgJ = 0;
+bool encrypt = false;
+bool decrypt = false;
+
 BITMAPINFOHEADER infoHeader;
 BITMAPFILEHEADER fileHeader;
 HANDLE bmp, msgFile;
@@ -83,27 +87,16 @@ USHORT getUSHORT(char buffer[2]) {
 }
 
 int writeCurrentPixel() {
-	bmp = CreateFile(imgFileName, GENERIC_WRITE, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
-	if (bmp == INVALID_HANDLE_VALUE) {
-		printf("cannot read or open image file");
-		return 0;
-	}
 	SetFilePointer(bmp, absoluteCurPosition - 3, 0, FILE_BEGIN);
 	if (!WriteFile(bmp, &CUR_PIXEL, sizeof(CUR_PIXEL), &dwReaded, 0)) {
-		CloseHandle(bmp);
+		printf("Ошибка записи шифрованного пикселя в файл %d", GetLastError());
 		return 0;
 	}
-	CloseHandle(bmp);
 	return -1;
 }
 
 int readCurrentPixel() {
-	bmp = CreateFile(imgFileName, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
-	if (bmp == INVALID_HANDLE_VALUE) {
-		printf("\nCannot read or open image file");
-		CloseHandle(bmp);
-		return 0;
-	}
+
 	SetFilePointer(bmp, absoluteCurPosition, 0, FILE_BEGIN);
 	if (!ReadFile(bmp, &CUR_PIXEL, sizeof(Pixel), &dwReaded, 0)) {
 		printf("\nerror reading pixel");
@@ -113,10 +106,7 @@ int readCurrentPixel() {
 	absoluteCurPosition += 3;
 	if (++curImagePos > infoHeader.biWidth) {
 		curImagePos = 0;
-		//SetFilePointer(bmp, infoHeader.biWidth % 4, 0, FILE_CURRENT);
-		//absoluteCurPosition += infoHeader.biWidth % 4;
 	}
-	CloseHandle(bmp);
 	return 1;
 }
 
@@ -144,13 +134,13 @@ void printMenu() {
 	printf("\n\t\t\2)Прочитать сообщение из файла");
 	printf("\n\t\t\3)Выход");
 }
-int cryptMessage(char *message) {
-	int len = strlen(message);
-	if (strlen(message) > imageCapacity(&infoHeader)) {
+int cryptMessage(char *message, int messageLength) {
+	
+	if (messageLength > imageCapacity(&infoHeader)) {
 		printf("\nРазмер сообщения не соответствует размеру изображения.");
 		return 0;
 	}
-	if (len == 0 && message[1] != 0) {
+	if (messageLength == 0 && message[1] != 0) {
 		for (int i = 0; i < 2; i++) {
 			if (!cryptAndRewriteChar(message[i])) {
 				printf("\n error crypt char");
@@ -159,7 +149,7 @@ int cryptMessage(char *message) {
 		}
 	}
 	else {
-		for (int i = 0; i < len; i++) {
+		for (int i = 0; i < messageLength; i++) {
 			if (!cryptAndRewriteChar(message[i])) {
 				printf("\n error crypt char");
 				return 0;
@@ -191,25 +181,110 @@ char* readData(int len) {
 	}
 	return data;
 }
+
+bool isKey(wchar_t* arg) {
+	bool flag = false;
+	flag = lstrcmpW(arg, L"-e") ? false : true;
+	flag = lstrcmpW(arg, L"--encrypt") ? false : true;
+	flag = lstrcmpW(arg, L"-d") ? false : true;
+	flag = lstrcmpW(arg, L"--decrypt") ? false : true;
+	flag = lstrcmpW(arg, L"-h") ? false : true;
+	flag = lstrcmpW(arg, L"--help") ? false : true;
+	return flag;
+}
+
+bool isPresent(wchar_t* arg) {
+	if (arg != NULL) {
+		return true; //проверка наличия аргумента
+	}
+	printf("Не передан аргумент. Справка -h|--help");
+	exit(666);
+}
+
+bool isKeyValid(wchar_t* arg[], int paramsCount) {
+	isPresent(arg[0]);
+	for (int i = 1; i <= paramsCount; i++) {
+		if (isPresent(arg[i])) { //аргумент команды должен быть представлен и не должен являться ключем
+			isKey(arg[i]);
+		}
+	}
+	return true;
+}
+
+void help() {
+	printf("Для управления используются следующие ключи:\n");
+	printf("\t\t -h --help вызов помощи\n");
+	printf("\t\t -e --encrypt [msgFile] [bmpFile] сокрытие входного файла в изображении\n");
+	printf("\t\t -d --decrypt [bmpFiile] проверка наличия и извлечение сокрытого сообщения\n\t\tрезультат в файле \"decrypted\"");
+	exit(1);
+}
+
+void argsParser(int argc, wchar_t* argv[]) {
+	for (int i = 0; i < argc; i++) {
+		if (lstrcmpW(argv[i], L"-h") == 0 || lstrcmpW(argv[i], L"--help") == 0) {
+			help();
+		}
+		if (lstrcmpW(argv[i], L"-e") == 0 || lstrcmpW(argv[i], L"--encrypt") == 0) {
+			if (isKeyValid(&argv[i], 2)) {
+				if (decrypt) {
+					printf("Можно вызвать только одну процедуру -d/-e");
+					exit(666);
+				}
+				encrypt = true;
+				inputFile = argv[i + 1];
+				outputFile = argv[i + 2];
+			}
+		}
+		if (lstrcmpW(argv[i], L"-d") == 0 || lstrcmpW(argv[i], L"--decrypt") == 0) {
+			if (isKeyValid(&argv[i], 1)) {
+				if (encrypt) {
+					printf("Можно вызвать только одну процедуру -d/-e");
+					exit(666);
+				}
+				decrypt = true;
+				inputFile = argv[i + 1];
+			}
+		}
+	}
+}
+
+void printMessage(char* message, int len) {
+
+	HANDLE decrypted = CreateFile(L"decrypted", GENERIC_ALL, FILE_SHARE_READ, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
+	if (bmp == INVALID_HANDLE_VALUE) {
+		printf("cannot read or open image file to read");
+		exit(666);
+	}
+	if (!WriteFile(decrypted, message, len, &dwReaded, 0)) {
+		printf("Ошибка записи расшифрованного файла %d", GetLastError());
+		CloseHandle(decrypted);
+		exit(666);
+	}
+	CloseHandle(decrypted);
+}
+
 int _tmain(int argc, _TCHAR* argv[])
 {
-#pragma region init
 	SetConsoleCP(1251);
 	SetConsoleOutputCP(1251);
-	bmp = CreateFile(imgFileName, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+#pragma region init
+	argsParser(argc, argv);
+	
+	bmp = CreateFile(outputFile, GENERIC_ALL, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
 	if (bmp == INVALID_HANDLE_VALUE) {
-		printf("cannot read or open image file");
+		printf("cannot read or open image file to read");
 		return -1;
 	}
-	msgFile = CreateFile(msgFileName, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
-	if (bmp == INVALID_HANDLE_VALUE) {
+	msgFile = CreateFile(inputFile, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+	if (msgFile == INVALID_HANDLE_VALUE && !decrypt) {
 		printf("cannot open msg file");
 		return -1;
 	}
-	if (!ReadFile(msgFile, &buffer, MAX_SIZE_MSG, &dwReaded, 0)) {
+	if (!ReadFile(msgFile, &buffer, MAX_SIZE_MSG, &dwReaded, 0) && !decrypt) {
 		printf("cannot Read msg");
 		return -1;
 	}
+
 	if (!ReadFile(bmp, &fileHeader, sizeof(BITMAPFILEHEADER), &dwReaded, 0)) {
 		printf("cannot read or open image file");
 		return -1;
@@ -218,69 +293,67 @@ int _tmain(int argc, _TCHAR* argv[])
 		printf("cannot read or open image file");
 		return -1;
 	}
-	if (strlen(buffer) + 4 > imageCapacity(&infoHeader)) {
-		printf("\nРазмер сообщения не соответствует размеру изображения.");
-		return 0;
+
+	if (!decrypt) {
+		DWORD dwSizeH = 0, dwSizeL = 0;
+		dwSizeL = GetFileSize(msgFile, &dwSizeH);
+		fileLength = ((LONGLONG)dwSizeH * ((LONGLONG)MAXDWORD + 1)) + dwSizeL;
+
+		if (fileLength + 4 > imageCapacity(&infoHeader)) {
+			printf("\nРазмер сообщения не соответствует размеру изображения.");
+			return 0;
+		}
 	}
+
+	SetFilePointer(bmp, fileHeader.bfOffBits, 0, FILE_BEGIN);
 	SetFilePointer(bmp, fileHeader.bfOffBits, 0, FILE_BEGIN);
 	absoluteCurPosition = fileHeader.bfOffBits;
-	CloseHandle(bmp);
 #pragma endregion
 
-	while (true) {
-
-		printMenu();
-		char key = _getch();
-		switch (key) {
-		case '1': {
 #pragma region crypt
-			bool hasErrors = false;
-			if (!cryptMessage(calcCrc((unsigned char*)buffer, strlen(buffer)))) {
-				printf("\nОшибка. Не удалось записать контрольную сумму.");
-				hasErrors = true;
-			};
-			if (!cryptMessage(msgLenToChar(strlen(buffer))) && !hasErrors) {
-				printf("\nОшибка. Не удалось записать длину сообщения.");
-			};
-			if (!cryptMessage(buffer) && !hasErrors) {
-				printf("\nОшибка. Не удалось записать сообщение.");
-			};
-			absoluteCurPosition = fileHeader.bfOffBits;
-			if (!hasErrors) {
-				printf("\nУспех.");
-			}
-			_getch();
-			break;
-#pragma endregion
+	if (encrypt) {
+		bool hasErrors = false;
+		if (!cryptMessage(calcCrc((unsigned char*)buffer, fileLength),2)) {
+			printf("\nОшибка. Не удалось записать контрольную сумму.");
+			hasErrors = true;
+		};
+		if (!cryptMessage(msgLenToChar(fileLength),2) && !hasErrors) {
+			printf("\nОшибка. Не удалось записать длину сообщения.");
+		};
+		if (!cryptMessage(buffer,fileLength) && !hasErrors) {
+			printf("\nОшибка. Не удалось записать сообщение.");
+		};
+		absoluteCurPosition = fileHeader.bfOffBits;
+		if (!hasErrors) {
+			printf("Успех.");
 		}
-
-		case '2': {
-#pragma region decrypt
-			bool hasErrors = false;
-			char* crc = readData(2);
-			char* msglen = readData(2);
-			USHORT len = getUSHORT(msglen);
-			if (len + 4 > imageCapacity(&infoHeader)) {
-				printf("Файл не содержит сообщения. Длина %d явно превышает максимальную вместимость.");
-				hasErrors = true;
-			}
-			char* message = readData(len);
-			if (strcmp(calcCrc((unsigned char*)message, len), crc) && !hasErrors) {
-				printf("Несовпадение контрольной суммы. Файл не содержит сообщения.");
-				hasErrors = true;
-			}
-			if (!hasErrors) {
-				printf("\n\t\tReaded message: %s", message);
-				printf("\n\t\tУспех.");
-			}
-			_getch();
-#pragma endregion
-			break;
-		}
-		case '3':
-			goto end;
-		}
+		_getch();
 	}
-end:
+#pragma endregion
+#pragma region decrypt
+	if (decrypt) {
+		bool hasErrors = false;
+		char* crc = readData(2);
+		char* msglen = readData(2);
+		USHORT len = getUSHORT(msglen);
+		if (len + 4 > imageCapacity(&infoHeader)) {
+			printf("Файл не содержит сообщения. Длина %d явно превышает максимальную вместимость.");
+			hasErrors = true;
+		}
+		char* message = readData(len);
+		if (strcmp(calcCrc((unsigned char*)message, len), crc) && !hasErrors) {
+			printf("Несовпадение контрольной суммы. Файл не содержит сообщения.");
+			free(message);
+			hasErrors = true;
+		}
+		if (!hasErrors) {
+			printMessage(message, len);
+			free(message);
+			printf("Успех.");
+		}
+		_getch();
+	}
+#pragma endregion
+	CloseHandle(bmp);
 	return 0;
 }

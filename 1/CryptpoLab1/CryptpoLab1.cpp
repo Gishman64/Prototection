@@ -11,11 +11,12 @@
 
 using namespace std;
 bool debug = false;
+int key[10] = { 4, 1, 6, 2, 9, 3, 5, 7, 10, 8 };
+int getFileSize(const wchar_t* toCryptFileName);
 
 void encrypt(int key[], const wchar_t* toCryptFileName, const wchar_t* toDecryptFileName = L"Encrypt.txt");
 
-
-void encrypt(int key[], const wchar_t* toCryptFileName, const wchar_t* toDecryptFileName) {
+void encrypt(int key[], const wchar_t* toCryptFileName, const wchar_t* toWriteFileName) {
 	char sourceChar;
 	ifstream read(toCryptFileName, ios::binary);
 	vector<char> vec1, vec2;
@@ -47,8 +48,10 @@ void encrypt(int key[], const wchar_t* toCryptFileName, const wchar_t* toDecrypt
 			encryptionKeyPosition++;
 		}
 	}
-	ofstream write(toDecryptFileName, ios::trunc | ios::binary);
-	for (int i = 0; i < vec2.size(); i++)
+	int msgSize = getFileSize(toCryptFileName);
+	ofstream write(toWriteFileName, ios::trunc | ios::binary);
+	write << msgSize;
+	for (int i = 0; i < (vec2.size()); i++)
 	{
 		write << vec2[i]; //запись результата в файл
 	}
@@ -58,7 +61,6 @@ void encrypt(int key[], const wchar_t* toCryptFileName, const wchar_t* toDecrypt
 
 
 
-int getFileSize(const wchar_t* toCryptFileName);
 
 char* cutString(char* str, int targetSize) {
 	char* result = 0;
@@ -69,6 +71,7 @@ char* cutString(char* str, int targetSize) {
 	{
 		result[i] = str[i];
 	}
+	free(str);
 	result[i] = '\0';
 	return result;
 }
@@ -80,8 +83,9 @@ void decrypt(int key[],
 
 	char sourceChar;
 	vector<char> vec1, vec2;
-
+	int originFileSize = 0;
 	ifstream read(toDecryptFileName, ios::binary);
+	read >> originFileSize;
 	while (read.get(sourceChar))
 	{
 		vec1.push_back(sourceChar);
@@ -112,7 +116,7 @@ void decrypt(int key[],
 
 	int fileSize = getFileSize(toDecryptFileName);
 	ofstream write(toWriteFileName, ios::binary);
-	for (int i = 0; i < fileSize; i++)
+	for (int i = 0; i < originFileSize; i++)
 	{
 		write << vec2[i];
 	}
@@ -138,6 +142,7 @@ void decrypt(int key[],
 		system(command);
 		cout << "Выполнено.\n";
 		system("pause");
+		free(command);
 	}
 }
 
@@ -155,62 +160,17 @@ int getFileSize(const wchar_t* toCryptFileName) {
 	return size;
 }
 
-void menu() {
-
-	char menu_word;
-	int  c, key[10] = { 4, 1, 6, 2, 9, 3, 5, 7, 10, 8 };
-
-	cout << "1) Зашифровать исходный файл.\n";
-	cout << "2) Расшифровать исходный файл.\n";
-	cout << "3) Сравнить исходный и результирующий файлы.\n";
-	cout << "ESC) Выход.\n";
-	switch ((menu_word = _getch()))
-	{
-	case '1':
-		cout << "Шифрование исходного текста...\n";
-		//encrypt(key);
-		cout << "Выполнено.\n";
-		system("pause");
-		break;
-	case '2':
-		cout << "Расшифровка текста...\n";
-		decrypt(key);
-		cout << "Выполнено.\n";
-		system("pause");
-		break;
-	case '3':
-		cout << "Сравнение текстовых файлов...\n";
-		system("FC Source.txt Decrypted.txt");
-		cout << "Выполнено.\n";
-		system("pause");
-		break;
-	case 27:
-		cout << "Завершение процессов и закрытие программы....\n";
-		exit(0);
-		break;
-	default:
-		break;
-	}
-}
-
 bool isDebugEnabled(int args, wchar_t *argv[]) {
 
 	for (int i = 0; i < args; i++) {
-		if (lstrcmpW(argv[i], L"-d") == 0 && ((bool)argv[i + 1] == true || (bool)argv[i + 1] == false)) {
+		if ((lstrcmpW(argv[i], L"-d") == 0 || lstrcmpW(argv[i], L"--debug") == 0)
+			&& ((bool)argv[i + 1] == true || (bool)argv[i + 1] == false))
+		{
 			if (lstrcmpW(argv[i + 1], L"false") == 0) return false;
+			if (lstrcmpW(argv[i + 1], L"true") == 0) return true;
 		}
 	}
-	return true;
-}
-
-wchar_t* getFilePath(int args, wchar_t *argv[], wchar_t* filePath = (wchar_t*)L"Source.txt") {
-	for (int i = 0; i < args; i++) {
-		if (lstrcmpW(argv[i], L"-p") == 0) {
-			filePath = (wchar_t*)malloc(sizeof(wchar_t) * lstrlenW(argv[i + 1]));
-			filePath = argv[i + 1];
-		}
-	}
-	return filePath;
+	return false;
 }
 
 bool isHelpRequested(int args, wchar_t *argv[]) {
@@ -223,28 +183,41 @@ bool isHelpRequested(int args, wchar_t *argv[]) {
 	}
 }
 
+int validateArg(wchar_t* arg, const wchar_t* argName) {
+	if (arg == NULL) {
+		wcout << argName << L" аргумент отсутствует проверьте мануал ключ -h" << endl;
+		exit(-666);
+	}
+	return 1;
+}
+
 void isEncryptCalled(int argc, wchar_t *argv[]) {
 
-	int key[10] = { 4, 1, 6, 2, 9, 3, 5, 7, 10, 8 };
 	for (int i = 0; i < argc; i++) {
 		if (lstrcmpW(argv[i], L"--encrypt") == 0) {
 			if (argc < 4) {
 				printf("Возможно формат команды неверен, проверьте мануал. Ключ \"-h\"\n");
 				exit(-1);
 			}
+			validateArg(argv[i + 1], L"originalFileName");
+			validateArg(argv[i + 2], L"toEncryptFileName");
+
 			encrypt(key, argv[i + 1], argv[i + 2]);
 		}
 	}
 }
 
 void isDecryptCalled(int argc, wchar_t *argv[]) {
-
-	int key[10] = { 4, 1, 6, 2, 9, 3, 5, 7, 10, 8 };
 	for (int i = 0; i < argc; i++) {
 		if (lstrcmpW(argv[i], L"--decrypt") == 0) {
-			if (argc < 5) {
+			if (argc < 4) {
 				printf("Возможно формат команды неверен, проверьте мануал. Ключ \"-h\"\n");
 				exit(-1);
+			}
+			validateArg(argv[i + 1], L"toDecryptFileName");
+			validateArg(argv[i + 2], L"encryptedFileName");
+			if (debug) {
+				validateArg(argv[i + 3], L"originalFileName");
 			}
 			decrypt(key, argv[i + 1], argv[i + 2], argv[i + 3]);
 		}
@@ -254,7 +227,7 @@ void isDecryptCalled(int argc, wchar_t *argv[]) {
 void printAllArgs(int argc, wchar_t *argv[]) {
 	for (int i = 0; i < argc; i++)
 	{
-		wcout << argv[i]<< endl;
+		wcout << argv[i] << endl;
 	}
 }
 
@@ -264,11 +237,10 @@ int wmain(int argc, wchar_t *argv[], wchar_t *envp[])
 	SetConsoleOutputCP(1251);
 	setlocale(LC_ALL, "Russian");
 	int  c, key[10] = { 4, 1, 6, 2, 9, 3, 5, 7, 10, 8 };
-	isHelpRequested(argc, argv);
 	debug = isDebugEnabled(argc, argv);
+	isHelpRequested(argc, argv);
 	isEncryptCalled(argc, argv);
 	isDecryptCalled(argc, argv);
-	system("pause");
 }
 
 

@@ -8,20 +8,23 @@
 #include <conio.h>
 #include <vector>
 #include <math.h>
+#include "l2.h"
 #define BLOCK_SIZE 5
+typedef unsigned int BIT;
 
 int key[] = { 12, 13, 30, 5, 27, 6, 11, 25, 3, 21, 22, 2, 23, 0, 8, 4, 18, 19, 10, 1, 14, 29, 9, 28, 20, 17, 26, 31, 7, 16, 15, 24 };
-const unsigned int SIZE_BLOCK = (sizeof(key) / sizeof(int));
 
 using namespace std;
+bool debug = false;
+wchar_t* original;
 typedef unsigned int Block;
 vector<char> vec1;
-int getBit(Block block, int numBit)
+
+BIT GetBit(Block block, INT numBit)
 {
 	return ((block & (1 << numBit)) != 0);
 }
-
-int setBit(Block block, int numBit)
+BIT SetBit(Block block, INT numBit)
 {
 	return (block | (1 << numBit));
 }
@@ -34,11 +37,11 @@ int unsetBit(Block block, int numBit)
 int cryptBlock(Block block)
 {
 	Block tempBlock = 0;
-	for (int i = 0; i < SIZE_BLOCK; i++)
+	for (int i = 0; i < 32; i++)
 	{
-		int tempBit = getBit(block, key[i]);
+		int tempBit = GetBit(block, i);
 		if (tempBit == 1)
-			tempBlock = setBit(tempBlock, i);
+			tempBlock = SetBit(tempBlock, key[i]);
 	}
 	return tempBlock;
 }
@@ -46,144 +49,218 @@ int cryptBlock(Block block)
 int decryptBlock(Block block)
 {
 	Block tempBlock = 0;
-	for (int i = 0; i < SIZE_BLOCK; i++)
+	for (int i = 0; i < 32; i++)
 	{
-		int tempBit = getBit(block, i);
+		int tempBit = GetBit(block, key[i]);
 		if (tempBit == 1)
-			tempBlock = setBit(tempBlock, key[i]);
+			tempBlock = SetBit(tempBlock, i);
 	}
 	return tempBlock;
 }
 
-void printBlock(Block block, bool debug = false)
+BOOL encryptFile(LPCWSTR fileName)
 {
-	if (debug)
+	HANDLE hSourceFile, hDestFile;
+	DWORD dwReaded = 0, dwWrote = 0;
+	Block block = 0;
+	BOOL bResult = FALSE;
+
+	hSourceFile = CreateFile(fileName, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (hSourceFile == INVALID_HANDLE_VALUE)
 	{
-		printf("NumBit\t");
-		for (int i = SIZE_BLOCK; i > 0; i--)
+		printf("Error CreateFile! Error = %ld\n", GetLastError());
+		return FALSE;
+	}
+
+	hDestFile = CreateFile(TEXT("encrypted"), GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (hDestFile == INVALID_HANDLE_VALUE)
+	{
+		printf("Error CreateFile! Error = %ld\n", GetLastError());
+		return -1;
+	}
+
+	DWORD dwSizeH = 0, dwSizeL = 0;
+	dwSizeL = GetFileSize(hSourceFile, &dwSizeH);
+	LONGLONG fileLength = ((LONGLONG)dwSizeH * ((LONGLONG)MAXDWORD + 1)) + dwSizeL;
+
+	if (!WriteFile(hDestFile, &fileLength, sizeof(LONGLONG), &dwWrote, NULL))
+	{
+		printf("Error WriteFile! error = %ld\n", GetLastError());
+		return FALSE;
+	}
+
+	do
+	{
+		memset(&block, 0, BLOCK_SIZE);
+		if (!(bResult = ReadFile(hSourceFile, &block, BLOCK_SIZE, &dwReaded, NULL)))
 		{
-			printf("%3d", i);
+			printf("Error ReadFile! error = %ld\n", GetLastError());
+			return FALSE;
 		}
-		printf("\n");
-	}
-	printf("Block\t");
+		if (dwReaded)
+		{
+			block = cryptBlock(block);
+			if (!WriteFile(hDestFile, &block, BLOCK_SIZE, &dwWrote, NULL))
+			{
+				printf("Error WriteFile! error = %ld\n", GetLastError());
+				return FALSE;
+			}
+		}
+	} while (bResult && dwReaded);
 
-	for (int i = SIZE_BLOCK - 1; i >= 0; i--)
-	{
-		printf("%3d", getBit(block, i));
-	}
-	printf("\n");
+	CloseHandle(hSourceFile);
+	CloseHandle(hDestFile);
+
+	return TRUE;
 }
-
-Block performBlock(char buffer[BLOCK_SIZE]) {
+BOOL decryptFile(LPCWSTR fileName)
+{
+	HANDLE hSourceFile, hDestFile;
+	DWORD dwReaded = 0, dwWrote = 0;
 	Block block = 0;
 
-	block |= buffer[0] << 24;
-	block |= (buffer[1] << 16) & 0x00ffffff;
-	block |= buffer[2] << 8 & 0x0000ffff;
-	block |= buffer[3] & 0x000000ff;
-	return block;
-}
-
-char* performBufferFromBlock(Block block, char buffer[BLOCK_SIZE]) {
-	buffer[0] = (block >> 24) & 255;
-	buffer[1] = (block >> 16) & 255;
-	buffer[2] = (block >> 8) & 255;
-	buffer[3] = (block) & 255;
-	return buffer;
-}
-
-void push_back_buffer(char buffer[BLOCK_SIZE]) {
-	vec1.clear();
-	for (int i = 0; i < strlen(buffer);  i++)
+	hSourceFile = CreateFile(fileName, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (hSourceFile == INVALID_HANDLE_VALUE)
 	{
-		vec1.push_back(buffer[i]);
+		printf("Error CreateFile! Error = %ld\n", GetLastError());
+		return FALSE;
 	}
-}
 
-void encrypt() {
-	ifstream read("Source.txt", ios::binary);
-	ofstream write("Encrypted.txt", ios::binary | ios::trunc);
-		char buffer[BLOCK_SIZE];
-	Block block;
-	while (read.get(buffer, BLOCK_SIZE))
+	hDestFile = CreateFile(TEXT("decrypted"), GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (hDestFile == INVALID_HANDLE_VALUE)
 	{
-		block = performBlock(buffer);
-		block = cryptBlock(block);
-		performBufferFromBlock(block,buffer);
-		write.write(buffer, BLOCK_SIZE);
+		printf("Error CreateFile! Error = %ld\n", GetLastError());
+		return -1;
 	}
-	write.close();
-	read.close();
-}
 
-void decrypt() {
-	ifstream read("Encrypted.txt", ios::binary);
-	ofstream write("Decrypted.txt", ios::binary | ios::trunc);
-	char buffer[BLOCK_SIZE];
-	Block block;
-	while (read.getline(buffer, BLOCK_SIZE,'\0')) {
-		block = performBlock(buffer);
-		block = decryptBlock(block);
-		if (!strcmp(buffer, " ")) {
-			continue;
+	LONGLONG sourceLength;
+
+	if (!ReadFile(hSourceFile, &sourceLength, sizeof(LONGLONG), &dwReaded, NULL))
+	{
+		printf("Error ReadFile! error = %ld\n", GetLastError());
+		return FALSE;
+	}
+
+	while (sourceLength > 0)
+	{
+		memset(&block, 0, BLOCK_SIZE);
+		if (!ReadFile(hSourceFile, &block, BLOCK_SIZE, &dwReaded, NULL))
+		{
+			printf("Error ReadFile! error = %ld\n", GetLastError());
+			return FALSE;
 		}
-		performBufferFromBlock(block, buffer);
-		push_back_buffer(buffer);
-		for (int i = 0; i < vec1.size(); i++) {
-			write << vec1[i];
+		if (dwReaded)
+		{
+			block = decryptBlock(block);
+			if (!WriteFile(hDestFile, &block, sourceLength > BLOCK_SIZE ? BLOCK_SIZE : (DWORD)sourceLength, &dwWrote, NULL))
+			{
+				printf("Error WriteFile! error = %ld\n", GetLastError());
+				return FALSE;
+			}
+		}
+		sourceLength -= BLOCK_SIZE;
+	}
+
+	CloseHandle(hSourceFile);
+	CloseHandle(hDestFile);
+
+	if (debug) {
+		string command = "FC ";
+		char* temp;
+		int len = 0;
+		int totalLen = 3;
+		len = lstrlenW(TEXT("decrypted"));
+		totalLen += len;
+		temp = (char*)malloc(sizeof(char) * len);
+		wcstombs(temp, TEXT("decrypted"), len);
+		command.append(temp);
+		command = command.substr(0, totalLen);
+		free(temp);
+
+		command.append(" ");
+		totalLen++;
+		command = command.substr(0, totalLen);
+		len = lstrlenW(original);
+		totalLen += len;
+		temp = (char*)malloc(sizeof(char) * len);
+		wcstombs(temp, original, len);
+		command.append(temp);
+		command = command.substr(0, totalLen);
+		free(temp);
+
+		system(command.data());
+	}
+
+	return TRUE;
+}
+void help() {
+	printf("Для управления используются следующие ключи:\n");
+	printf("\t\t -h --help вызов помощи\n");
+	printf("\t\t -d --debug [true/false] [originalFile] вывод отладочной информации\n");
+	printf("\t\t -e --encrypt [inputFile] шифрование файла\n");
+	printf("\t\t -de --decrypt [inputFile] дешифровка файла\n");
+}
+
+bool isKey(wchar_t* arg) {
+	bool flag = false;
+	flag = lstrcmpW(arg, L"-e") ? false : true;
+	flag = lstrcmpW(arg, L"--encrypt") ? false : true;
+	flag = lstrcmpW(arg, L"-de") ? false : true;
+	flag = lstrcmpW(arg, L"--decrypt") ? false : true;
+	flag = lstrcmpW(arg, L"-h") ? false : true;
+	flag = lstrcmpW(arg, L"--help") ? false : true;
+	flag = lstrcmpW(arg, L"-d") ? false : true;
+	flag = lstrcmpW(arg, L"--debug") ? false : true;
+	return flag;
+}
+
+bool isPresent(wchar_t* arg) {
+	if (arg != NULL) {
+		return true; //проверка наличия аргумента
+	}
+	wcout << L"Не передан аргумент. Справка -h|--help" << endl;
+	exit(666);
+}
+
+bool isKeyValid(wchar_t* arg[], int paramsCount) {
+	isPresent(arg[0]);
+	for (int i = 1; i <= paramsCount; i++) {
+		if (isPresent(arg[i])) { //аргумент команды должен быть представлен и не должен являться ключем
+			isKey(arg[i]);
 		}
 	}
-	write.close();
-	read.close();
+	return true;
 }
 
-void menu() {
-
-	char menu_word;
-
-	cout << "1) Зашифровать исходный файл.\n";
-	cout << "2) Расшифровать исходный файл.\n";
-	cout << "3) Сравнить исходный и результирующий файлы.\n";
-	cout << "ESC) Выход.\n";
-	switch ((menu_word = _getch()))
-	{
-	case '1':
-		cout << "Шифрование исходного текста...\n";
-		encrypt();
-		cout << "Выполнено.\n";
-		system("pause");
-		break;
-	case '2':
-		cout << "Расшифровка текста...\n";
-		decrypt();
-		cout << "Выполнено.\n";
-		system("pause");
-		break;
-	case '3':
-		cout << "Сравнение текстовых файлов...\n";
-		system("FC Source.txt Decrypted.txt");
-		cout << "Выполнено.\n";
-		system("pause");
-		break;
-	case 27:
-		cout << "Завершение процессов и закрытие программы....\n";
-		exit(0);
-		break;
-	default:
-		break;
+void argsParser(int argc, wchar_t* argv[]) {
+	for (int i = 0; i < argc; i++) {
+		if (lstrcmpW(argv[i], L"-h") == 0 || lstrcmpW(argv[i], L"--help") == 0) {
+			help();
+		}
+		if (lstrcmpW(argv[i], L"-d") == 0 || lstrcmpW(argv[i], L"--debug") == 0) {
+			if (isKeyValid(&argv[i], 2)) {
+				if (lstrcmpW(argv[i + 1], L"false") == 0) debug = false;
+				if (lstrcmpW(argv[i + 1], L"true") == 0) debug = true;
+				original = argv[i + 2];
+			}
+		}
+		if (lstrcmpW(argv[i], L"-e") == 0 || lstrcmpW(argv[i], L"--encrypt") == 0) {
+			if (isKeyValid(&argv[i], 1)) {
+				encryptFile(argv[i + 1]);
+			}
+		}
+		if (lstrcmpW(argv[i], L"-de") == 0 || lstrcmpW(argv[i], L"--decrypt") == 0) {
+			if (isKeyValid(&argv[i], 1)) {
+					decryptFile(argv[i + 1]);
+			}
+		}
 	}
 }
-
-int _tmain(int argc, _TCHAR* argv[])
+int _tmain(int argc, wchar_t* argv[])
 {
 	SetConsoleOutputCP(1251);
 	SetConsoleCP(1251);
-	menu();
-	while (true) {
-		system("cls");
-		menu();
-	}
+	argsParser(argc, argv);
 	system("pause");
 	return 0;
 }
